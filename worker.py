@@ -41,6 +41,28 @@ r2 = boto3.client(
 ACT_RE = re.compile(
     r'\b((?:[A-Z][A-Za-z&./\'\-]*\s+|of\s+|and\s+|the\s+|for\s+|from\s+)*'
     r'(?:Act|Code|Ordinance))\b(?:[,\s]*(1[6-9]\d{2}|20\d{2}))?')
+# Advocates overwhelmingly write the abbreviation, not the short title —
+# "IPC" and "Cr.P.C." outnumber "Indian Penal Code" in real judgments, so an
+# Act/Code/Ordinance-only pattern silently loses most criminal citations.
+ABBR_RE = re.compile(
+    r'\b('
+    r'I\.?P\.?C\.?|Cr\.?\s?P\.?\s?C\.?|C\.?P\.?C\.?|N\.?I\.?\s?Act|'
+    r'NDPS|POCSO|D\.?V\.?\s?Act|PMLA|SARFAESI|FEMA|RERA|IBC|MSMED|'
+    r'P\.?C\.?\s?Act|TADA|UAPA|MCOCA|JJ\s?Act|SC/ST\s?Act|MV\s?Act|CGST|IGST'
+    r')\b(?![a-z])')
+ABBR_MAP = {
+    'ipc': 'Indian Penal Code', 'crpc': 'Code of Criminal Procedure',
+    'cpc': 'Code of Civil Procedure', 'niact': 'Negotiable Instruments Act',
+    'ndps': 'NDPS Act', 'pocso': 'POCSO Act',
+    'dvact': 'Protection of Women from Domestic Violence Act',
+    'pmla': 'Prevention of Money Laundering Act', 'sarfaesi': 'SARFAESI Act',
+    'fema': 'Foreign Exchange Management Act', 'rera': 'Real Estate (Regulation and Development) Act',
+    'ibc': 'Insolvency and Bankruptcy Code', 'msmed': 'MSMED Act',
+    'pcact': 'Prevention of Corruption Act', 'tada': 'TADA', 'uapa': 'UAPA',
+    'mcoca': 'MCOCA', 'jjact': 'Juvenile Justice Act', 'scstact': 'SC/ST Act',
+    'mvact': 'Motor Vehicles Act', 'cgst': 'CGST Act', 'igst': 'IGST Act',
+}
+
 SEC_RE = re.compile(
     r'\b(?:[Ss]ections?|[Ss]ecs?\.|u/s|U/[Ss])\s*'
     r'([0-9]{1,4}[A-Z]{0,3}(?:\s*\(\s*[0-9a-zA-Z]{1,3}\s*\))*)')
@@ -77,6 +99,11 @@ def parse(text):
         c = clean_act(m.group(1), m.group(2))
         if c:
             acts[c] += 1
+    for m in ABBR_RE.finditer(text):
+        key = re.sub(r'[^a-z]', '', m.group(1).lower())
+        full = ABBR_MAP.get(key)
+        if full:
+            acts[full] += 1
     secs = {re.sub(r'\s+', '', s) for s in SEC_RE.findall(text)}
     arts = {"Art." + a for a in ART_RE.findall(text)}
     return acts, sorted(secs | arts)
