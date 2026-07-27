@@ -64,9 +64,73 @@ SHORT = {
     "industrial disputes act": ("Industrial Disputes Act, 1947", 1947, "ID"),
     "land acquisition act": ("Land Acquisition Act, 1894", 1894, "LA"),
     "essential commodities act": ("Essential Commodities Act, 1955", 1955, "EC"),
+    "delhi rent control act": ("Delhi Rent Control Act, 1958", 1958, "DRC"),
+    "hindu marriage act": ("Hindu Marriage Act, 1955", 1955, "HMA"),
+    "hindu succession act": ("Hindu Succession Act, 1956", 1956, "HSA"),
+    "hindu adoption and maintenance act": ("Hindu Adoptions and Maintenance Act, 1956", 1956, "HAMA"),
+    "special marriage act": ("Special Marriage Act, 1954", 1954, "SMA"),
+    "guardians and wards act": ("Guardians and Wards Act, 1890", 1890, "GWA"),
+    "transfer of property act": ("Transfer of Property Act, 1882", 1882, "TPA"),
+    "specific relief act": ("Specific Relief Act, 1963", 1963, "SRA"),
+    "indian contract act": ("Indian Contract Act, 1872", 1872, "CONTRACT"),
+    "contract act": ("Indian Contract Act, 1872", 1872, "CONTRACT"),
+    "dowry prohibition act": ("Dowry Prohibition Act, 1961", 1961, "DOWRY"),
+    "payment of gratuity act": ("Payment of Gratuity Act, 1972", 1972, "GRATUITY"),
+    "p g act": ("Payment of Gratuity Act, 1972", 1972, "GRATUITY"),
+    "payment of wages act": ("Payment of Wages Act, 1936", 1936, "WAGES"),
+    "minimum wages act": ("Minimum Wages Act, 1948", 1948, "MINWAGE"),
+    "employees compensation act": ("Employees Compensation Act, 1923", 1923, "EC-COMP"),
+    "customs act": ("Customs Act, 1962", 1962, "CUSTOMS"),
+    "central excise act": ("Central Excise Act, 1944", 1944, "EXCISE"),
+    "court fees act": ("Court Fees Act, 1870", 1870, "CFA"),
+    "court-fees act": ("Court Fees Act, 1870", 1870, "CFA"),
+    "identification of prisoners act": ("Identification of Prisoners Act, 1920", 1920, "IDPRIS"),
+    "right to information act": ("Right to Information Act, 2005", 2005, "RTI"),
+    "information act": ("Right to Information Act, 2005", 2005, "RTI"),
+    "delhi value added tax act": ("Delhi Value Added Tax Act, 2004", 2004, "DVAT"),
+    "dvat act": ("Delhi Value Added Tax Act, 2004", 2004, "DVAT"),
+    "delhi school education act": ("Delhi School Education Act, 1973", 1973, "DSEA"),
+    "delhi development act": ("Delhi Development Act, 1957", 1957, "DDA"),
+    "delhi municipal corporation act": ("Delhi Municipal Corporation Act, 1957", 1957, "DMC"),
+    "securitisation and reconstruction of financial assets and enforcement of security interest act":
+        ("SARFAESI Act, 2002", 2002, "SARFAESI"),
+    "sarfaesi act": ("SARFAESI Act, 2002", 2002, "SARFAESI"),
+    "prevention of money laundering act": ("Prevention of Money Laundering Act, 2002", 2002, "PMLA"),
+    "insolvency and bankruptcy code": ("Insolvency and Bankruptcy Code, 2016", 2016, "IBC"),
+    "right to fair compensation and transparency in land acquisition rehabilitation and resettlement act":
+        ("RFCTLARR Act, 2013", 2013, "RFCTLARR"),
+    "rehabilitation and resettlement act": ("RFCTLARR Act, 2013", 2013, "RFCTLARR"),
+    "juvenile justice act": ("Juvenile Justice (Care and Protection of Children) Act, 2015", 2015, "JJ"),
+    "trade marks act": ("Trade Marks Act, 1999", 1999, "TM"),
+    "copyright act": ("Copyright Act, 1957", 1957, "COPYRIGHT"),
+    "patents act": ("Patents Act, 1970", 1970, "PATENTS"),
+    "consumer protection act": ("Consumer Protection Act, 2019", 2019, "CPA"),
+    "information technology act": ("Information Technology Act, 2000", 2000, "IT-ACT"),
+    "foreign exchange management act": ("Foreign Exchange Management Act, 1999", 1999, "FEMA"),
+    "registration act": ("Registration Act, 1908", 1908, "REG"),
+    "indian stamp act": ("Indian Stamp Act, 1899", 1899, "STAMP"),
+    "stamp act": ("Indian Stamp Act, 1899", 1899, "STAMP"),
+    "delhi police act": ("Delhi Police Act, 1978", 1978, "DPA"),
+    "electricity act": ("Electricity Act, 2003", 2003, "ELEC"),
+    "wealth tax act": ("Wealth Tax Act, 1957", 1957, "WT"),
+    "finance act": ("Finance Act", None, "FIN"),
+    "central goods and services tax act": ("CGST Act, 2017", 2017, "CGST"),
 }
 
+SENT = re.compile(r".*(?:[.;:]|\bthe\b\s*$)\s+(?=[A-Z])")
+
+def presplit(s):
+    """Drop text that bled in from the previous sentence: 'Committee. The Act'
+    -> 'The Act'. Also reject candidates that are plainly not a short title."""
+    s = re.sub(r"\s+", " ", str(s)).strip()
+    if ". " in s:
+        s = s.rsplit(". ", 1)[-1]
+    if re.match(r"^[A-Z]\b", s) and len(s.split()) <= 4:   # "B of the Act"
+        return ""
+    return s
+
 def norm(s):
+    s = presplit(s)
     s = re.sub(r"\s+", " ", str(s)).strip()
     s = re.sub(r"[.,;:()\[\]\"'’‘]", " ", s)
     s = re.sub(r"\s+", " ", s).strip().lower()
@@ -80,6 +144,9 @@ def split_year(s):
     return base, y
 
 def canonical(raw):
+    raw = presplit(raw)
+    if not raw:
+        return None, None, None
     base, yr = split_year(raw)
     n = norm(base)
     if n in SHORT:

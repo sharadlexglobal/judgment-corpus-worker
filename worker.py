@@ -11,7 +11,7 @@ never lands on disk. Resumable: a tar whose output already exists on R2 is
 skipped, so the worker can be restarted freely.
 """
 import os, re, io, sys, json, time, gzip, tarfile, subprocess, collections
-import urllib.request, urllib.error
+import urllib.request, urllib.error, hashlib
 import boto3
 from botocore.config import Config
 
@@ -108,6 +108,51 @@ def parse(text):
     arts = {"Art." + a for a in ART_RE.findall(text)}
     return acts, sorted(secs | arts)
 
+# ---------- what kind of document is this? ----------
+# Length alone is a poor guide: a 3,400-character order can be a reasoned
+# judgment, and a 19,000-character one can be a pure listing order. The text
+# itself says which — a judgment is reserved and pronounced, is delivered by a
+# Judge (never a Registrar), is written in numbered paragraphs, and reasons.
+RESERVED  = re.compile(r'RESERVED\s+ON|PRONOUNCED\s+ON|DATE\s+OF\s+RESERV|'
+                       r'Judgment\s+reserved|Judgment\s+delivered|DATE\s+OF\s+DECISION', re.I)
+HDR_JUDG  = re.compile(r'^\s*(?:JUDGMENT|J\s*U\s*D\s*G\s*M\s*E\s*N\s*T)\s*$', re.I | re.M)
+REGISTRAR = re.compile(r'CORAM:.{0,80}REGISTRAR', re.I | re.S)
+JUSTICE   = re.compile(r"HON'?BLE\s+(?:MR\.?|MS\.?|MRS\.?|DR\.?)?\s*JUSTICE", re.I)
+PARA_RE   = re.compile(r'^\s{0,6}(\d{1,3})\.\s', re.M)
+PAGES_RE  = re.compile(r'Page\s+\d+\s+of\s+(\d+)', re.I)
+REASON_RE = re.compile(r'\b(?:we are of the (?:considered )?(?:view|opinion)|'
+                       r'in our (?:considered )?(?:view|opinion)|it is well settled|held that|'
+                       r'the ratio|laid down in|relied upon|having considered|'
+                       r'for the foregoing reasons|in the light of the above)\b', re.I)
+PRECED_RE = re.compile(r'\(\d{4}\)\s*\d+\s*SCC\b|\bAIR\s+\d{4}\s+SC\b|\b\d{4}\s+SCC\s+\d+', re.I)
+LISTING_RE= re.compile(r'\b(?:list (?:the matter|it) (?:on|before)|renotify|re-notify|adjourn|'
+                       r'stands? over|next date of hearing|for arguments on)\b', re.I)
+
+def doc_score(t):
+    paras = [int(m.group(1)) for m in PARA_RE.finditer(t)]
+    pages = [int(m.group(1)) for m in PAGES_RE.finditer(t)]
+    max_para = max(paras) if paras else 0
+    npages   = max(pages) if pages else 0
+    reasoning  = len(REASON_RE.findall(t))
+    precedents = len(PRECED_RE.findall(t))
+    listing    = len(LISTING_RE.findall(t))
+    s = 0
+    if REGISTRAR.search(t):  s -= 6
+    if RESERVED.search(t):   s += 5
+    if HDR_JUDG.search(t):   s += 4
+    if JUSTICE.search(t):    s += 1
+    if max_para >= 10:       s += 3
+    elif max_para >= 5:      s += 1
+    if npages >= 10:         s += 2
+    elif npages >= 5:        s += 1
+    s += min(reasoning, 4) + min(precedents, 3) - min(listing, 3)
+    if len(t) < 2000:        s -= 3
+    elif len(t) > 20000:     s += 2
+    kind = "judgment" if s >= 6 else ("order" if s >= 1 else "listing")
+    return kind, s, {"para": max_para, "pages": npages, "reason": reasoning,
+                     "prec": precedents, "listing": listing,
+                     "reserved": bool(RESERVED.search(t))}
+
 # ---------- s3 helpers ----------
 def list_keys(prefix):
     """List the public bucket without credentials."""
@@ -141,6 +186,7 @@ def process_tar(tar_key):
         log("SKIP (done):", tar_key)
         return 0, collections.Counter()
     buf, acts_all = io.BytesIO(), collections.Counter()
+    kinds = collections.Counter()
     gz = gzip.GzipFile(fileobj=buf, mode="wb")
     n = empty = 0
     nbytes = 0
@@ -164,9 +210,16 @@ def process_tar(tar_key):
                 empty += 1
             acts, secs = parse(txt)
             acts_all.update(acts)
+            kind, score, sig = doc_score(txt)
+            kinds[kind] += 1
             gz.write((json.dumps({
                 "file": os.path.basename(m.name),
                 "chars": len(txt),
+                "kind": kind,
+                "score": score,
+                "sig": sig,
+                "thash": hashlib.sha1(re.sub(r"\s+", " ", txt).strip().lower()
+                                      .encode()).hexdigest()[:16],
                 "acts": acts.most_common(10),
                 "secs": secs[:60],
             }, ensure_ascii=False) + "\n").encode())
@@ -181,7 +234,8 @@ def process_tar(tar_key):
                   ContentType="application/gzip")
     el = time.time() - t0
     log(f"OK {tar_key} -> {out_key} | {n} docs {el:.0f}s {n/max(el,1):.1f}/s "
-        f"empty={empty} out={len(body)/1e6:.1f}MB")
+        f"empty={empty} out={len(body)/1e6:.1f}MB | "
+        f"judgments={kinds['judgment']} orders={kinds['order']} listings={kinds['listing']}")
     return n, acts_all
 
 def main():
