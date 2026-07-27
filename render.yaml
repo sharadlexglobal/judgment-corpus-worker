@@ -1,7 +1,0 @@
-services:
-  - type: worker
-    name: judgment-corpus-worker
-    runtime: python
-    plan: pro_ultra
-    buildCommand: "apt-get update -qq && apt-get install -y -qq poppler-utils || pip install --no-cache-dir -r requirements.txt; pip install --no-cache-dir -r requirements.txt"
-    startCommand: "python worker.py"
