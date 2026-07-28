@@ -8,6 +8,6 @@ RUN apt-get update -qq \
 WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
-COPY worker.py substance.py secbind.py .
+COPY worker.py substance.py secbind.py orderrule.py .
 
 CMD ["python", "-u", "worker.py"]

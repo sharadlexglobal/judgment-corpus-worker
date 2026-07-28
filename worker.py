@@ -14,6 +14,7 @@ import os, re, io, sys, json, time, gzip, tarfile, subprocess, collections
 import urllib.request, urllib.error, hashlib
 from substance import marks as substance_marks
 from secbind import bound_sections
+from orderrule import order_rules, schedules
 import boto3
 from botocore.config import Config
 
@@ -216,6 +217,17 @@ def process_tar(tar_key):
             # section with every Act in the judgment invents citations that
             # nobody made ("s.498A of the DV Act"), which is worse than a gap.
             bound, loose_secs = bound_sections(txt)
+            # The civil side of the CPC lives in its Orders and Rules, written in
+            # Roman numerals — "Order XXXVII Rule 3". A section-only reader records
+            # s.151 and misses the summary suit the case is actually about.
+            ors = order_rules(txt)
+            if ors:
+                for _act in list(bound):
+                    if re.search(r'\b(?:C\.?P\.?C|Civil Procedure)\b', _act, re.I):
+                        bound[_act] = sorted(set(bound[_act]) | set(ors))
+                        break
+                else:
+                    bound["Code of Civil Procedure"] = ors
             kind, score, sig = doc_score(txt)
             sub = substance_marks(txt)
             # A same-day s.482 quashing order is never "reserved and pronounced",
@@ -239,6 +251,8 @@ def process_tar(tar_key):
                 "secs": secs[:60],
                 "bound": {k: v[:20] for k, v in list(bound.items())[:12]},
                 "loose_secs": loose_secs[:20],
+                "order_rules": ors[:25],
+                "schedules": schedules(txt)[:6],
             }, ensure_ascii=False) + "\n").encode())
             n += 1
             if n % PROGRESS == 0:
