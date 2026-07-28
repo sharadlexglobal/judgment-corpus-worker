@@ -12,6 +12,7 @@ skipped, so the worker can be restarted freely.
 """
 import os, re, io, sys, json, time, gzip, tarfile, subprocess, collections
 import urllib.request, urllib.error, hashlib
+from substance import marks as substance_marks
 import boto3
 from botocore.config import Config
 
@@ -211,13 +212,22 @@ def process_tar(tar_key):
             acts, secs = parse(txt)
             acts_all.update(acts)
             kind, score, sig = doc_score(txt)
+            sub = substance_marks(txt)
+            # A same-day s.482 quashing order is never "reserved and pronounced",
+            # yet it can turn on a Supreme Court ratio. Promote on substance so
+            # that body of work is not filed away as routine.
+            if sub["substantive"] and kind != "judgment":
+                kind = "order"          # keep the label honest...
+                sig["promoted"] = True  # ...but flag that it carries law
             kinds[kind] += 1
+            if sub["substantive"]: kinds["substantive"] += 1
             gz.write((json.dumps({
                 "file": os.path.basename(m.name),
                 "chars": len(txt),
                 "kind": kind,
                 "score": score,
                 "sig": sig,
+                "marks": sub,
                 "thash": hashlib.sha1(re.sub(r"\s+", " ", txt).strip().lower()
                                       .encode()).hexdigest()[:16],
                 "acts": acts.most_common(10),
@@ -235,7 +245,8 @@ def process_tar(tar_key):
     el = time.time() - t0
     log(f"OK {tar_key} -> {out_key} | {n} docs {el:.0f}s {n/max(el,1):.1f}/s "
         f"empty={empty} out={len(body)/1e6:.1f}MB | "
-        f"judgments={kinds['judgment']} orders={kinds['order']} listings={kinds['listing']}")
+        f"judgments={kinds['judgment']} orders={kinds['order']} "
+        f"listings={kinds['listing']} carrying-law={kinds['substantive']}")
     return n, acts_all
 
 def main():
