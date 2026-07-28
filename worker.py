@@ -13,6 +13,7 @@ skipped, so the worker can be restarted freely.
 import os, re, io, sys, json, time, gzip, tarfile, subprocess, collections
 import urllib.request, urllib.error, hashlib
 from substance import marks as substance_marks
+from secbind import bound_sections
 import boto3
 from botocore.config import Config
 
@@ -211,6 +212,10 @@ def process_tar(tar_key):
                 empty += 1
             acts, secs = parse(txt)
             acts_all.update(acts)
+            # Sections tied to the Act they were written with. Pairing every
+            # section with every Act in the judgment invents citations that
+            # nobody made ("s.498A of the DV Act"), which is worse than a gap.
+            bound, loose_secs = bound_sections(txt)
             kind, score, sig = doc_score(txt)
             sub = substance_marks(txt)
             # A same-day s.482 quashing order is never "reserved and pronounced",
@@ -232,6 +237,8 @@ def process_tar(tar_key):
                                       .encode()).hexdigest()[:16],
                 "acts": acts.most_common(10),
                 "secs": secs[:60],
+                "bound": {k: v[:20] for k, v in list(bound.items())[:12]},
+                "loose_secs": loose_secs[:20],
             }, ensure_ascii=False) + "\n").encode())
             n += 1
             if n % PROGRESS == 0:
