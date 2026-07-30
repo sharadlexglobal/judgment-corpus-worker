@@ -18,7 +18,15 @@ from orderrule import order_rules, schedules
 import boto3
 from botocore.config import Config
 
-S3_PUBLIC = "https://indian-high-court-judgments.s3.ap-south-1.amazonaws.com/"
+# SOURCE picks which open-data bucket to read. The two differ in layout, not
+# in content shape: High Court tars sit under court=/bench=, Supreme Court tars
+# under english/ and regional/ with no court level at all.
+SOURCE    = os.environ.get("SOURCE", "hc").strip().lower()
+BUCKETS   = {"hc": "indian-high-court-judgments",
+             "sc": "indian-supreme-court-judgments"}
+if SOURCE not in BUCKETS:
+    sys.exit(f"SOURCE must be one of {sorted(BUCKETS)}, got {SOURCE!r}")
+S3_PUBLIC = f"https://{BUCKETS[SOURCE]}.s3.ap-south-1.amazonaws.com/"
 COURTS    = [c.strip() for c in os.environ.get("COURTS", "7_26").split(",") if c.strip()]
 YEAR_FROM = int(os.environ.get("YEAR_FROM", "2000"))
 YEAR_TO   = int(os.environ.get("YEAR_TO", "2026"))
@@ -270,14 +278,38 @@ def process_tar(tar_key):
         f"listings={kinds['listing']} carrying-law={kinds['substantive']}")
     return n, acts_all
 
-def main():
-    log("worker start | courts:", COURTS, "| years:", YEAR_FROM, "-", YEAR_TO)
+def queued_tars():
+    """Every archive to process, for whichever source is selected.
+
+    High Court: one data.tar per bench per year, under court=/bench=.
+    Supreme Court: english/ and regional/ tars per year, no court level — so
+    COURTS does not apply there and is ignored.
+
+    Both sources also publish incremental part-*.tar files alongside the base
+    archive, holding the most recent filings. INCLUDE_PARTS picks those up. It
+    defaults off for the High Court so that turning it on stays a deliberate
+    choice rather than something that silently re-queues a running sweep; the
+    Supreme Court has no data.tar at all, so there it is always on.
+    """
+    parts = os.environ.get("INCLUDE_PARTS", "0") == "1"
     tars = []
-    for court in COURTS:
+    if SOURCE == "sc":
         for year in range(YEAR_FROM, YEAR_TO + 1):
-            tars += [k for k in list_keys(f"data/tar/year={year}/court={court}/")
-                     if k.endswith("/data.tar")]
-    log(f"{len(tars)} bench-year archives queued")
+            tars += [k for k in list_keys(f"data/tar/year={year}/")
+                     if k.endswith(".tar")]
+    else:
+        for court in COURTS:
+            for year in range(YEAR_FROM, YEAR_TO + 1):
+                tars += [k for k in list_keys(f"data/tar/year={year}/court={court}/")
+                         if k.endswith("/data.tar") or (parts and k.endswith(".tar"))]
+    return sorted(set(tars))
+
+def main():
+    log("worker start | source:", SOURCE, "| courts:",
+        COURTS if SOURCE == "hc" else "(n/a)",
+        "| years:", YEAR_FROM, "-", YEAR_TO)
+    tars = queued_tars()
+    log(f"{len(tars)} archives queued")
     total, grand = 0, collections.Counter()
     for i, t in enumerate(tars, 1):
         try:
