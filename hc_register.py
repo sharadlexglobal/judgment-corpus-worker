@@ -103,16 +103,29 @@ def load_one(conn, key):
         per_doc.append(((cnr, order_no, ddate), d.get("acts") or [],
                         d.get("bound") or {}, d.get("secs") or []))
 
-    execute_values(cur, """INSERT INTO judgments
-        (cnr,order_no,decision_date,court_code,bench,year,kind,n_chars,text_hash,
+    # Two conflict targets, so two statements. Dated rows are guarded by
+    # UNIQUE (cnr, order_no, decision_date). Undated ones — Allahabad and a few
+    # others name files without a date — are guarded by the partial index
+    # judgments_hc_undated_uniq, because NULL never equals NULL and the first
+    # constraint silently lets those through. Both keep the fuller extraction.
+    COLS = """(cnr,order_no,decision_date,court_code,bench,year,kind,n_chars,text_hash,
          cites_precedent,interprets_law,grants_relief,mere_adjournment,substantive,
-         pdf_key,text_key,order_rules,schedules)
-        VALUES %s ON CONFLICT (cnr,order_no,decision_date)
-        DO UPDATE SET n_chars=EXCLUDED.n_chars, kind=EXCLUDED.kind,
+         pdf_key,text_key,order_rules,schedules)"""
+    KEEP_FULLER = """DO UPDATE SET n_chars=EXCLUDED.n_chars, kind=EXCLUDED.kind,
                       text_hash=EXCLUDED.text_hash,
                       order_rules=EXCLUDED.order_rules, schedules=EXCLUDED.schedules
-        WHERE EXCLUDED.n_chars > judgments.n_chars""",
-        jrows, page_size=1000)
+        WHERE EXCLUDED.n_chars > judgments.n_chars"""
+    dated   = [r for r in jrows if r[2] is not None]
+    undated = [r for r in jrows if r[2] is None]
+    if dated:
+        execute_values(cur, f"""INSERT INTO judgments {COLS} VALUES %s
+            ON CONFLICT (cnr,order_no,decision_date) {KEEP_FULLER}""",
+            dated, page_size=1000)
+    if undated:
+        execute_values(cur, f"""INSERT INTO judgments {COLS} VALUES %s
+            ON CONFLICT (court_code,bench,cnr,order_no)
+            WHERE court_code<>'SC' AND decision_date IS NULL {KEEP_FULLER}""",
+            undated, page_size=1000)
 
     cur.execute("""SELECT cnr,order_no,decision_date,id FROM judgments
                    WHERE court_code=%s AND year=%s AND bench=%s""", (court, year, bench))
