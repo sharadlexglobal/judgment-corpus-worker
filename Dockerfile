@@ -9,5 +9,9 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 COPY worker.py substance.py secbind.py orderrule.py .
+# The register loaders run from this same image, selected per service by
+# dockerCommand. hc_register.py imports canonical/parse_name from loader.py,
+# and loader.py needs schema.sql beside it.
+COPY loader.py hc_register.py schema.sql .
 
 CMD ["python", "-u", "worker.py"]
